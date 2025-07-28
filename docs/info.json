@@ -1,0 +1,16 @@
+{
+  "name": "Caio Gallo",
+  "social": [
+    "https://www.linkedin.com/in/caio-gallo"
+  ],
+  "source-code-repo": "https://github.com/CaioDGallo/onecent",
+  "langs": [
+    "go"
+  ],
+  "storages": [
+    "postgres"
+  ],
+  "load-balancers": [
+    "haproxy"
+  ]
+}
