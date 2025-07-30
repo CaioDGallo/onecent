@@ -24,7 +24,7 @@ func NewPaymentHandler(workerPools *workers.WorkerPools, defaultFee float64) *Pa
 
 func (h *PaymentHandler) CreatePayment(c fiber.Ctx) error {
 	var paymentRequest types.PaymentRequest
-	requestedAt := time.Now()
+	requestedAt := time.Now().Add(-100 * time.Millisecond)
 
 	body := c.Body()
 

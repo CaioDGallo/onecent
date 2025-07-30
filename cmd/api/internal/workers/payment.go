@@ -154,19 +154,13 @@ func (wp *WorkerPools) createPaymentRecord(correlationID string, amount decimal.
 	defer tx.Rollback()
 
 	if isRetry {
-		_, err = tx.Exec(
-			"UPDATE payment_log SET status = $1, payment_processor = $2, fee = $3, processing_started_at = NULL WHERE idempotency_key = $4 AND status = 'pending'",
-			status, processor, fee, correlationID,
-		)
+		_, err = tx.Stmt(wp.PreparedStmts.Update).Exec(status, processor, fee, correlationID)
 		if err != nil {
 			logger.Error("CRITICAL: Failed to update payment")
 			return
 		}
 	} else {
-		_, err = tx.Exec(
-			"INSERT INTO payment_log (idempotency_key, payment_processor, amount, fee, requested_at, status) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (idempotency_key) DO NOTHING",
-			correlationID, processor, amount, fee, requestedAt, status,
-		)
+		_, err = tx.Stmt(wp.PreparedStmts.Insert).Exec(correlationID, processor, amount, fee, requestedAt, status)
 		if err != nil {
 			logger.Error("CRITICAL: Failed to insert payment")
 			return
@@ -179,6 +173,52 @@ func (wp *WorkerPools) createPaymentRecord(correlationID string, amount decimal.
 	}
 }
 
+func (wp *WorkerPools) markPaymentPending(correlationID string) {
+	tx, err := wp.DB.Begin()
+	if err != nil {
+		logger.Error("Failed to begin payment pending transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Stmt(wp.PreparedStmts.MarkPending).Exec(correlationID)
+	if err != nil {
+		logger.Error("Failed to mark payment as pending")
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		logger.Error("Failed to commit payment pending transaction")
+		return
+	}
+}
+
+func (wp *WorkerPools) markMultiplePaymentsPending(correlationIDs []string) {
+	if len(correlationIDs) == 0 {
+		return
+	}
+
+	tx, err := wp.DB.Begin()
+	if err != nil {
+		logger.Error("Failed to begin batch payment pending transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	for _, id := range correlationIDs {
+		_, err = tx.Stmt(wp.PreparedStmts.MarkPending).Exec(id)
+		if err != nil {
+			logger.Error("Failed to mark payment as pending in batch")
+			return
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		logger.Error("Failed to commit batch payment pending transaction")
+		return
+	}
+}
+
 func (wp *WorkerPools) processFailedPayments() {
 	tx, err := wp.DB.Begin()
 	if err != nil {
@@ -187,14 +227,7 @@ func (wp *WorkerPools) processFailedPayments() {
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.Query(`
-		SELECT idempotency_key, amount, fee, requested_at 
-		FROM payment_log 
-		WHERE status = 'failed' 
-		AND (processing_started_at IS NULL OR processing_started_at < NOW() - INTERVAL '30 seconds')
-		ORDER BY requested_at ASC 
-		LIMIT 200 
-		FOR UPDATE SKIP LOCKED`)
+	rows, err := tx.Stmt(wp.PreparedStmts.SelectFailed).Query()
 	if err != nil {
 		logger.Error("Failed to query failed payments")
 		return
@@ -226,35 +259,19 @@ func (wp *WorkerPools) processFailedPayments() {
 		})
 	}
 
-	if len(paymentIDs) == 0 {
-		return
-	}
-
-	for _, id := range paymentIDs {
-		_, err = tx.Exec("UPDATE payment_log SET status = 'pending', processing_started_at = NOW() WHERE idempotency_key = $1", id)
-		if err != nil {
-			logger.Error("Failed to mark payment as pending")
-			return
-		}
-	}
-
 	if err = tx.Commit(); err != nil {
 		logger.Error("Failed to commit retry transaction")
 		return
 	}
 
-	processedCount := 0
+	if len(paymentIDs) == 0 {
+		return
+	}
+
+	wp.markMultiplePaymentsPending(paymentIDs)
+
 	for _, task := range paymentTasks {
-		wp.wg.Add(1)
-		if err := wp.RetryPool.Submit(func() {
-			defer wp.wg.Done()
-			wp.ProcessPaymentDirect(task, true)
-		}); err != nil {
-			wp.wg.Done()
-			logger.Error("Failed to submit retry for payment")
-		} else {
-			processedCount++
-		}
+		wp.RetryTaskChannel <- task
 	}
 
 	logger.Info("retrying debug")

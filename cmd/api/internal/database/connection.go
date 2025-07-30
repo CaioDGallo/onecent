@@ -8,12 +8,14 @@ import (
 )
 
 type PreparedStatements struct {
-	Insert    *sql.Stmt
-	Update    *sql.Stmt
-	StatsAll  *sql.Stmt
-	StatsFrom *sql.Stmt
-	StatsTo   *sql.Stmt
-	StatsBoth *sql.Stmt
+	Insert       *sql.Stmt
+	Update       *sql.Stmt
+	SelectFailed *sql.Stmt
+	MarkPending  *sql.Stmt
+	StatsAll     *sql.Stmt
+	StatsFrom    *sql.Stmt
+	StatsTo      *sql.Stmt
+	StatsBoth    *sql.Stmt
 }
 
 func SetupDatabase(connStr string) (*sql.DB, *PreparedStatements, error) {
@@ -22,8 +24,8 @@ func SetupDatabase(connStr string) (*sql.DB, *PreparedStatements, error) {
 		return nil, nil, err
 	}
 
-	db.SetMaxOpenConns(8)
-	db.SetMaxIdleConns(4)
+	db.SetMaxOpenConns(115)
+	db.SetMaxIdleConns(55)
 	db.SetConnMaxLifetime(3 * time.Minute)
 	db.SetConnMaxIdleTime(1 * time.Minute)
 
@@ -58,10 +60,27 @@ func SetupDatabase(connStr string) (*sql.DB, *PreparedStatements, error) {
 		return nil, nil, err
 	}
 
+	selectFailedStmt, err := db.Prepare(SelectFailedPayments)
+	if err != nil {
+		insertStmt.Close()
+		updateStmt.Close()
+		return nil, nil, err
+	}
+
+	markPendingStmt, err := db.Prepare(MarkPaymentPending)
+	if err != nil {
+		insertStmt.Close()
+		updateStmt.Close()
+		selectFailedStmt.Close()
+		return nil, nil, err
+	}
+
 	statsAllStmt, err := db.Prepare(StatsAll)
 	if err != nil {
 		insertStmt.Close()
 		updateStmt.Close()
+		selectFailedStmt.Close()
+		markPendingStmt.Close()
 		return nil, nil, err
 	}
 
@@ -69,6 +88,8 @@ func SetupDatabase(connStr string) (*sql.DB, *PreparedStatements, error) {
 	if err != nil {
 		insertStmt.Close()
 		updateStmt.Close()
+		selectFailedStmt.Close()
+		markPendingStmt.Close()
 		statsAllStmt.Close()
 		return nil, nil, err
 	}
@@ -77,6 +98,8 @@ func SetupDatabase(connStr string) (*sql.DB, *PreparedStatements, error) {
 	if err != nil {
 		insertStmt.Close()
 		updateStmt.Close()
+		selectFailedStmt.Close()
+		markPendingStmt.Close()
 		statsAllStmt.Close()
 		statsFromStmt.Close()
 		return nil, nil, err
@@ -86,6 +109,8 @@ func SetupDatabase(connStr string) (*sql.DB, *PreparedStatements, error) {
 	if err != nil {
 		insertStmt.Close()
 		updateStmt.Close()
+		selectFailedStmt.Close()
+		markPendingStmt.Close()
 		statsAllStmt.Close()
 		statsFromStmt.Close()
 		statsToStmt.Close()
@@ -93,12 +118,14 @@ func SetupDatabase(connStr string) (*sql.DB, *PreparedStatements, error) {
 	}
 
 	stmts := &PreparedStatements{
-		Insert:    insertStmt,
-		Update:    updateStmt,
-		StatsAll:  statsAllStmt,
-		StatsFrom: statsFromStmt,
-		StatsTo:   statsToStmt,
-		StatsBoth: statsBothStmt,
+		Insert:       insertStmt,
+		Update:       updateStmt,
+		SelectFailed: selectFailedStmt,
+		MarkPending:  markPendingStmt,
+		StatsAll:     statsAllStmt,
+		StatsFrom:    statsFromStmt,
+		StatsTo:      statsToStmt,
+		StatsBoth:    statsBothStmt,
 	}
 
 	return db, stmts, nil
@@ -110,6 +137,12 @@ func (ps *PreparedStatements) Close() {
 	}
 	if ps.Update != nil {
 		ps.Update.Close()
+	}
+	if ps.SelectFailed != nil {
+		ps.SelectFailed.Close()
+	}
+	if ps.MarkPending != nil {
+		ps.MarkPending.Close()
 	}
 	if ps.StatsAll != nil {
 		ps.StatsAll.Close()

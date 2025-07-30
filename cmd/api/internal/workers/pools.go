@@ -3,23 +3,22 @@ package workers
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/panjf2000/ants/v2"
 	"github.com/sony/gobreaker/v2"
 
+	"github.com/CaioDGallo/onecent/cmd/api/internal/database"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/logger"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/types"
 )
 
 type WorkerPools struct {
-	ProcessingPool          *ants.Pool
-	RetryPool               *ants.Pool
 	PaymentTaskChannel      chan types.PaymentTask
+	RetryTaskChannel        chan types.PaymentTask
 	DB                      *sql.DB
+	PreparedStmts           *database.PreparedStatements
 	DefaultEndpoint         string
 	FallbackEndpoint        string
 	DefaultFee              float64
@@ -41,39 +40,14 @@ type WorkerPools struct {
 	lastFallbackHealthCheck time.Time
 }
 
-func NewWorkerPools(db *sql.DB, defaultEndpoint, fallbackEndpoint string, defaultFee, fallbackFee float64, httpClient *http.Client, defaultCB, fallbackCB, retryCB *gobreaker.CircuitBreaker[[]byte]) (*WorkerPools, error) {
+func NewWorkerPools(db *sql.DB, preparedStmts *database.PreparedStatements, defaultEndpoint, fallbackEndpoint string, defaultFee, fallbackFee float64, httpClient *http.Client, defaultCB, fallbackCB, retryCB *gobreaker.CircuitBreaker[[]byte]) (*WorkerPools, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	processingPool, err := ants.NewPool(150, ants.WithOptions(ants.Options{
-		ExpiryDuration: 30 * time.Second,
-		Nonblocking:    false,
-		PanicHandler: func(i interface{}) {
-			logger.Error("Payment processing worker panic")
-		},
-	}))
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create processing pool: %v", err)
-	}
-
-	retryPool, err := ants.NewPool(150, ants.WithOptions(ants.Options{
-		ExpiryDuration: 60 * time.Second,
-		Nonblocking:    false,
-		PanicHandler: func(i interface{}) {
-			logger.Error("Payment retry worker panic")
-		},
-	}))
-	if err != nil {
-		processingPool.Release()
-		cancel()
-		return nil, fmt.Errorf("failed to create retry pool: %v", err)
-	}
-
 	wp := &WorkerPools{
-		ProcessingPool:         processingPool,
-		RetryPool:              retryPool,
-		PaymentTaskChannel:     make(chan types.PaymentTask, 1200),
+		PaymentTaskChannel:     make(chan types.PaymentTask, 2500),
+		RetryTaskChannel:       make(chan types.PaymentTask, 2000),
 		DB:                     db,
+		PreparedStmts:          preparedStmts,
 		DefaultEndpoint:        defaultEndpoint,
 		FallbackEndpoint:       fallbackEndpoint,
 		DefaultFee:             defaultFee,
@@ -110,6 +84,7 @@ func (wp *WorkerPools) Shutdown(timeout time.Duration) error {
 
 	wp.cancel()
 	close(wp.PaymentTaskChannel)
+	close(wp.RetryTaskChannel)
 
 	done := make(chan struct{})
 	go func() {
@@ -123,9 +98,6 @@ func (wp *WorkerPools) Shutdown(timeout time.Duration) error {
 	case <-time.After(timeout):
 		logger.Info("Timeout reached, forcing shutdown")
 	}
-
-	wp.ProcessingPool.Release()
-	wp.RetryPool.Release()
 
 	logger.Info("Worker pools shutdown complete")
 	return nil
@@ -146,6 +118,28 @@ func (wp *WorkerPools) StartPaymentConsumers() {
 					func() {
 						defer wp.wg.Done()
 						wp.ProcessPaymentDirect(task, false)
+					}()
+				}
+			}
+		}()
+	}
+}
+
+func (wp *WorkerPools) StartRetryConsumers() {
+	for range 0 {
+		go func() {
+			for {
+				select {
+				case <-wp.ctx.Done():
+					return
+				case task, ok := <-wp.RetryTaskChannel:
+					if !ok {
+						return
+					}
+					wp.wg.Add(1)
+					func() {
+						defer wp.wg.Done()
+						wp.ProcessPaymentDirect(task, true)
 					}()
 				}
 			}

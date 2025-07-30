@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	db, preparedStmts, err := database.SetupDatabase(config.DatabaseConnectionString)
+	db, preparedStmts, err := database.SetupDatabase(config.GetDatabaseConnectionString())
 	if err != nil {
 		logger.Fatal("failed to setup database")
 	}
@@ -25,17 +25,17 @@ func main() {
 
 	httpClient := client.NewHTTPClient()
 
-	defaultFee, err := client.GetProcessorFee(httpClient, config.DefaultProcessorEndpoint)
+	defaultFee, err := client.GetProcessorFee(httpClient, config.GetDefaultProcessorEndpoint())
 	if err != nil {
 		logger.Fatal("failed getting the default processor transaction fee")
 	}
 
-	fallbackFee, err := client.GetProcessorFee(httpClient, config.FallbackProcessorEndpoint)
+	fallbackFee, err := client.GetProcessorFee(httpClient, config.GetFallbackProcessorEndpoint())
 	if err != nil {
 		logger.Fatal("failed getting the fallback processor transaction fee")
 	}
 
-	workerPools, err := workers.NewWorkerPools(db, config.DefaultProcessorEndpoint, config.FallbackProcessorEndpoint, defaultFee, fallbackFee, httpClient, nil, nil, nil)
+	workerPools, err := workers.NewWorkerPools(db, preparedStmts, config.GetDefaultProcessorEndpoint(), config.GetFallbackProcessorEndpoint(), defaultFee, fallbackFee, httpClient, nil, nil, nil)
 	if err != nil {
 		logger.Fatal("failed to initialize worker pools")
 	}
@@ -46,6 +46,7 @@ func main() {
 
 	workerPools.StartHealthCheckWorker()
 	workerPools.StartPaymentConsumers()
+	workerPools.StartRetryConsumers()
 
 	paymentHandler := handlers.NewPaymentHandler(workerPools, defaultFee)
 	statsHandler := handlers.NewStatsHandler(preparedStmts)

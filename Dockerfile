@@ -1,6 +1,6 @@
 FROM golang:1.24.4-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates tzdata gcc musl-dev
+RUN apk add --no-cache git tzdata
 
 WORKDIR /build
 
@@ -9,9 +9,11 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
   -ldflags="-s -w" \
   -trimpath \
+  #TODO: Remove before submit
+  -tags dev \
   -o app \
   ./cmd/api/main.go
 
@@ -20,7 +22,7 @@ RUN apk add --no-cache upx && \
 
 FROM alpine:3.19
 
-RUN apk add --no-cache sqlite-libs ca-certificates tzdata
+RUN apk add --no-cache tzdata
 
 COPY --from=builder /etc/passwd /etc/passwd
 
@@ -33,8 +35,8 @@ USER appuser
 
 EXPOSE 8080
 
-ENV GOGC=100 \
-  GOMEMLIMIT=90MiB \
+ENV GOGC=75 \
+  GOMEMLIMIT=25MiB \
   GOMAXPROCS=1
 
 ENTRYPOINT ["/app"]
