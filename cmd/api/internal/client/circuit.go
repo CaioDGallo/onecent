@@ -9,11 +9,11 @@ import (
 func NewCircuitBreakers(onRetryTrigger func()) (*gobreaker.CircuitBreaker[[]byte], *gobreaker.CircuitBreaker[[]byte], *gobreaker.CircuitBreaker[[]byte]) {
 	var defaultSettings gobreaker.Settings
 	defaultSettings.Name = "Default Payments Breaker"
-	defaultSettings.MaxRequests = 10
-	defaultSettings.Interval = time.Duration(1 * time.Second)
-	defaultSettings.Timeout = time.Duration(1500 * time.Millisecond)
+	defaultSettings.MaxRequests = 3
+	// defaultSettings.Interval = time.Duration(1 * time.Second)
+	defaultSettings.Timeout = time.Duration(100 * time.Millisecond)
 	defaultSettings.ReadyToTrip = func(counts gobreaker.Counts) bool {
-		return counts.ConsecutiveFailures >= 5
+		return counts.ConsecutiveFailures >= 3
 	}
 	// defaultSettings.OnStateChange = func(name string, from gobreaker.State, to gobreaker.State) {
 	// 	if (from == gobreaker.StateOpen || from == gobreaker.StateHalfOpen) && to == gobreaker.StateClosed {
@@ -27,9 +27,9 @@ func NewCircuitBreakers(onRetryTrigger func()) (*gobreaker.CircuitBreaker[[]byte
 
 	var fallbackSettings gobreaker.Settings
 	fallbackSettings.Name = "Fallback Payments Breaker"
-	fallbackSettings.MaxRequests = 10
-	fallbackSettings.Interval = time.Duration(1 * time.Second)
-	fallbackSettings.Timeout = time.Duration(2000 * time.Millisecond)
+	fallbackSettings.MaxRequests = 1
+	// fallbackSettings.Interval = time.Duration(1 * time.Second)
+	fallbackSettings.Timeout = time.Duration(500 * time.Millisecond)
 	fallbackSettings.ReadyToTrip = func(counts gobreaker.Counts) bool {
 		return counts.ConsecutiveFailures >= 5
 	}

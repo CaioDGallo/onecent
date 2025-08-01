@@ -64,8 +64,10 @@ type PaymentTask struct {
 }
 
 type ProcessorHealth struct {
-	Failing         bool `json:"failing"`
-	MinResponseTime int  `json:"minResponseTime"`
-	LastChecked     time.Time
-	IsValid         bool
+	Failing              bool `json:"failing"`
+	MinResponseTime      int  `json:"minResponseTime"`
+	LastChecked          time.Time
+	IsValid              bool
+	ConsecutiveFailures  int
+	ConsecutiveSuccesses int
 }

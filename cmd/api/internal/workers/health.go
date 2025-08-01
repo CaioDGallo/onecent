@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/CaioDGallo/onecent/cmd/api/internal/config"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/logger"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/types"
 )
 
 func (wp *WorkerPools) StartHealthCheckWorker() {
+	instanceID := config.GetInstanceID()
+
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
@@ -20,7 +23,9 @@ func (wp *WorkerPools) StartHealthCheckWorker() {
 			case <-wp.ctx.Done():
 				return
 			case <-ticker.C:
-				wp.checkProcessorHealth()
+				if instanceID == "1" {
+					wp.checkProcessorHealth()
+				}
 			}
 		}
 	}()
@@ -34,11 +39,10 @@ func (wp *WorkerPools) checkProcessorHealth() {
 		wp.lastDefaultHealthCheck = now
 	}
 
-	if now.Sub(wp.lastFallbackHealthCheck) >= 5*time.Second {
-		time.Sleep(2500 * time.Millisecond)
-		go wp.checkSingleProcessorHealth(wp.FallbackEndpoint, "fallback")
-		wp.lastFallbackHealthCheck = now.Add(2500 * time.Millisecond)
-	}
+	// if now.Sub(wp.lastFallbackHealthCheck) >= 5*time.Second {
+	// 	go wp.checkSingleProcessorHealth(wp.FallbackEndpoint, "fallback")
+	// 	wp.lastFallbackHealthCheck = now.Add(2500 * time.Millisecond)
+	// }
 }
 
 func (wp *WorkerPools) checkSingleProcessorHealth(endpoint, processorType string) {
@@ -54,6 +58,7 @@ func (wp *WorkerPools) checkSingleProcessorHealth(endpoint, processorType string
 	if err != nil {
 		logger.Error("Health check failed for processor")
 		wp.updateProcessorHealth(processorType, types.ProcessorHealth{IsValid: false})
+		wp.syncHealthAfterUpdate()
 		return
 	}
 	defer resp.Body.Close()
@@ -66,6 +71,7 @@ func (wp *WorkerPools) checkSingleProcessorHealth(endpoint, processorType string
 	if resp.StatusCode != 200 {
 		logger.Error("Health check returned bad status for processor")
 		wp.updateProcessorHealth(processorType, types.ProcessorHealth{IsValid: false})
+		wp.syncHealthAfterUpdate()
 		return
 	}
 
@@ -73,17 +79,18 @@ func (wp *WorkerPools) checkSingleProcessorHealth(endpoint, processorType string
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		logger.Error("Error decoding health response for processor")
 		wp.updateProcessorHealth(processorType, types.ProcessorHealth{IsValid: false})
+		wp.syncHealthAfterUpdate()
 		return
 	}
 
 	health.LastChecked = time.Now()
 	health.IsValid = true
 
-	logger.Info("HEALTHCHECK SUCCESSFUL")
-
 	wp.updateProcessorHealth(processorType, health)
-	logger.Info("Processor became healthy - triggering priority retry burst")
-	// go func() {
-	// 	wp.TriggerRetries()
-	// }()
+	wp.syncHealthAfterUpdate()
+
+	if processorType == "default" {
+		logger.Info("Default processor became healthy - triggering priority retry burst")
+		wp.TriggerRetries()
+	}
 }

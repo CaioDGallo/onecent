@@ -6,6 +6,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/CaioDGallo/onecent/cmd/api/internal/metrics"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/types"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/workers"
 )
@@ -24,7 +25,7 @@ func NewPaymentHandler(workerPools *workers.WorkerPools, defaultFee float64) *Pa
 
 func (h *PaymentHandler) CreatePayment(c fiber.Ctx) error {
 	var paymentRequest types.PaymentRequest
-	requestedAt := time.Now().Add(-100 * time.Millisecond)
+	requestedAt := time.Now().Add(-1 * time.Second)
 
 	body := c.Body()
 
@@ -43,7 +44,12 @@ func (h *PaymentHandler) CreatePayment(c fiber.Ctx) error {
 
 	select {
 	case h.WorkerPools.PaymentTaskChannel <- task:
+		// Record successful ingestion
+		metrics.RecordChannelIngest("payment", "success")
+		metrics.UpdateChannelSize("payment", len(h.WorkerPools.PaymentTaskChannel))
 	default:
+		// Record failed ingestion (queue full)
+		metrics.RecordChannelIngest("payment", "queue_full")
 		return c.Status(503).JSON(fiber.Map{
 			"error": "Payment processing queue is full",
 		})

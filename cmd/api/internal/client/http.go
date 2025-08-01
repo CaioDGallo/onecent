@@ -8,9 +8,9 @@ import (
 
 func NewHTTPClient() *http.Client {
 	transport := &http.Transport{
-		MaxIdleConns:        50,
-		MaxIdleConnsPerHost: 20,
-		MaxConnsPerHost:     40,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 40,
+		MaxConnsPerHost:     100,
 		IdleConnTimeout:     90 * time.Second,
 
 		ResponseHeaderTimeout: 10 * time.Second,

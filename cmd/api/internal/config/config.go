@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 const (
 	ServerAddress = ":8080"
@@ -33,5 +36,30 @@ func GetInstanceID() string {
 		instanceID = "1"
 	}
 	return instanceID
+}
+
+func GetOtherInstanceURL() string {
+	if url := os.Getenv("OTHER_INSTANCE_URL"); url != "" {
+		return url
+	}
+	return ""
+}
+
+func GetPaymentPoolSize() int {
+	if size := os.Getenv("PAYMENT_POOL_SIZE"); size != "" {
+		if poolSize, err := strconv.Atoi(size); err == nil && poolSize > 0 {
+			return poolSize
+		}
+	}
+	return 100 // Default pool size
+}
+
+func GetRetryPoolSize() int {
+	if size := os.Getenv("RETRY_POOL_SIZE"); size != "" {
+		if poolSize, err := strconv.Atoi(size); err == nil && poolSize > 0 {
+			return poolSize
+		}
+	}
+	return 50 // Default pool size
 }
 
