@@ -50,7 +50,6 @@ type WorkerPools struct {
 func NewWorkerPools(db *sql.DB, preparedStmts *database.PreparedStatements, defaultEndpoint, fallbackEndpoint string, defaultFee, fallbackFee float64, httpClient *http.Client, defaultCB, fallbackCB, retryCB *gobreaker.CircuitBreaker[[]byte]) (*WorkerPools, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create ants pools
 	paymentPoolSize := config.GetPaymentPoolSize()
 	retryPoolSize := config.GetRetryPoolSize()
 
@@ -90,19 +89,12 @@ func NewWorkerPools(db *sql.DB, preparedStmts *database.PreparedStatements, defa
 	return wp, nil
 }
 
-func (wp *WorkerPools) SetCircuitBreakers(defaultCB, fallbackCB, retryCB *gobreaker.CircuitBreaker[[]byte]) {
+func (wp *WorkerPools) SetCircuitBreakers(defaultCB *gobreaker.CircuitBreaker[[]byte]) {
 	wp.DefaultCircuitBreaker = defaultCB
-	wp.FallbackCircuitBreaker = fallbackCB
-	wp.RetryCircuitBreaker = retryCB
 	wp.lastDefaultState = defaultCB.State()
-	wp.lastFallbackState = fallbackCB.State()
 }
 
 func (wp *WorkerPools) TriggerRetries() {
-	// if wp.DefaultCircuitBreaker == nil || wp.FallbackCircuitBreaker == nil {
-	// 	return
-	// }
-	// logger.Info("Circuit breaker became available - triggering immediate retry burst")
 	wp.processFailedPayments()
 }
 
@@ -126,7 +118,6 @@ func (wp *WorkerPools) Shutdown(timeout time.Duration) error {
 		logger.Info("Timeout reached, forcing shutdown")
 	}
 
-	// Release ants pools
 	wp.paymentPool.Release()
 	wp.retryPool.Release()
 
@@ -135,7 +126,6 @@ func (wp *WorkerPools) Shutdown(timeout time.Duration) error {
 }
 
 func (wp *WorkerPools) StartPaymentConsumers() {
-	// Single goroutine to consume from channel and submit to ants pool
 	go func() {
 		for {
 			select {
@@ -146,57 +136,15 @@ func (wp *WorkerPools) StartPaymentConsumers() {
 					return
 				}
 
-				// Submit task to ants pool
 				wp.wg.Add(1)
 				_ = wp.paymentPool.Submit(func() {
 					defer wp.wg.Done()
 
-					wp.ProcessPaymentDirect(task, false)
+					wp.ProcessPaymentDirect(task)
 				})
 			}
 		}
 	}()
-}
-
-func (wp *WorkerPools) StartRetryConsumers() {
-	// // Single goroutine to consume from retry channel and submit to ants pool
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case <-wp.ctx.Done():
-	// 			return
-	// 		case task, ok := <-wp.RetryTaskChannel:
-	// 			if !ok {
-	// 				return
-	// 			}
-	//
-	// 			// Submit retry task to ants pool
-	// 			wp.wg.Add(1)
-	// 			_ = wp.retryPool.Submit(func() {
-	// 				defer wp.wg.Done()
-	//
-	// 				// Update retry pool metrics
-	// 				metrics.UpdateAntsPoolMetrics("retry", wp.retryPool.Running(), wp.retryPool.Cap(), wp.retryPool.Free())
-	//
-	// 				wp.ProcessPaymentDirect(task, true)
-	// 			})
-	// 		}
-	// 	}
-	// }()
-	//
-	// go func() {
-	// 	ticker := time.NewTicker(1 * time.Second)
-	// 	defer ticker.Stop()
-	//
-	// 	for {
-	// 		select {
-	// 		case <-wp.ctx.Done():
-	// 			return
-	// 		case <-ticker.C:
-	// 			wp.TriggerRetries()
-	// 		}
-	// 	}
-	// }()
 }
 
 func (wp *WorkerPools) updateProcessorHealth(processorType string, health types.ProcessorHealth) {
@@ -208,16 +156,6 @@ func (wp *WorkerPools) updateProcessorHealth(processorType string, health types.
 	} else {
 		wp.fallbackHealth = health
 	}
-}
-
-func (wp *WorkerPools) getProcessorHealth(processorType string) types.ProcessorHealth {
-	wp.healthMutex.RLock()
-	defer wp.healthMutex.RUnlock()
-
-	if processorType == "default" {
-		return wp.defaultHealth
-	}
-	return wp.fallbackHealth
 }
 
 func (wp *WorkerPools) UpdateProcessorHealthExternal(processorType string, health types.ProcessorHealth) {
@@ -280,50 +218,5 @@ func (wp *WorkerPools) syncHealthAfterUpdate() {
 	instanceID := config.GetInstanceID()
 	if instanceID == "1" {
 		go wp.syncHealthToOtherInstance()
-	}
-}
-
-func (wp *WorkerPools) trackPaymentResult(processor string, success bool) {
-	wp.healthMutex.Lock()
-	defer wp.healthMutex.Unlock()
-
-	var health *types.ProcessorHealth
-	if processor == "default" {
-		health = &wp.defaultHealth
-	} else {
-		health = &wp.fallbackHealth
-	}
-
-	if success {
-		health.ConsecutiveSuccesses++
-		health.ConsecutiveFailures = 0
-	} else {
-		health.ConsecutiveFailures++
-		health.ConsecutiveSuccesses = 0
-	}
-
-	wp.checkHealthThresholds(health)
-}
-
-func (wp *WorkerPools) checkHealthThresholds(health *types.ProcessorHealth) {
-	previouslyHealthy := health.IsValid && !health.Failing
-	newHealthState := previouslyHealthy
-
-	if health.ConsecutiveFailures >= 3 && previouslyHealthy {
-		health.Failing = true
-		health.IsValid = false
-		newHealthState = false
-		logger.Info("Processor marked as unhealthy due to 3 consecutive payment failures")
-	} else if health.ConsecutiveSuccesses >= 3 && !previouslyHealthy {
-		health.Failing = false
-		health.IsValid = true
-		newHealthState = true
-		logger.Info("Processor marked as healthy due to 3 consecutive payment successes")
-		wp.TriggerRetries()
-	}
-
-	if newHealthState != previouslyHealthy {
-		health.LastChecked = time.Now()
-		wp.syncHealthAfterUpdate()
 	}
 }

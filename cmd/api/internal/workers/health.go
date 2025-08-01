@@ -35,17 +35,13 @@ func (wp *WorkerPools) checkProcessorHealth() {
 	now := time.Now()
 
 	if now.Sub(wp.lastDefaultHealthCheck) >= 5*time.Second {
-		go wp.checkSingleProcessorHealth(wp.DefaultEndpoint, "default")
+		go wp.checkSingleProcessorHealth(wp.DefaultEndpoint)
 		wp.lastDefaultHealthCheck = now
 	}
-
-	// if now.Sub(wp.lastFallbackHealthCheck) >= 5*time.Second {
-	// 	go wp.checkSingleProcessorHealth(wp.FallbackEndpoint, "fallback")
-	// 	wp.lastFallbackHealthCheck = now.Add(2500 * time.Millisecond)
-	// }
 }
 
-func (wp *WorkerPools) checkSingleProcessorHealth(endpoint, processorType string) {
+func (wp *WorkerPools) checkSingleProcessorHealth(endpoint string) {
+	processorType := "default"
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/payments/service-health", endpoint), nil)
 	if err != nil {
 		logger.Error("Error creating health check request")
@@ -89,8 +85,6 @@ func (wp *WorkerPools) checkSingleProcessorHealth(endpoint, processorType string
 	wp.updateProcessorHealth(processorType, health)
 	wp.syncHealthAfterUpdate()
 
-	if processorType == "default" {
-		logger.Info("Default processor became healthy - triggering priority retry burst")
-		wp.TriggerRetries()
-	}
+	logger.Info("Default processor became healthy - triggering priority retry burst")
+	wp.TriggerRetries()
 }

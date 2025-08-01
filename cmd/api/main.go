@@ -40,13 +40,12 @@ func main() {
 		logger.Fatal("failed to initialize worker pools")
 	}
 
-	defaultCB, fallbackCB, retryCB := client.NewCircuitBreakers(workerPools.TriggerRetries)
+	defaultCB := client.NewCircuitBreaker()
 
-	workerPools.SetCircuitBreakers(defaultCB, fallbackCB, retryCB)
+	workerPools.SetCircuitBreakers(defaultCB)
 
 	workerPools.StartHealthCheckWorker()
 	workerPools.StartPaymentConsumers()
-	workerPools.StartRetryConsumers()
 
 	paymentHandler := handlers.NewPaymentHandler(workerPools, defaultFee)
 	statsHandler := handlers.NewStatsHandler(preparedStmts)

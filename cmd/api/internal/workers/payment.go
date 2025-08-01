@@ -15,7 +15,7 @@ import (
 	"github.com/CaioDGallo/onecent/cmd/api/internal/types"
 )
 
-func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask, isRetry bool) {
+func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("Payment processing worker panic recovered")
@@ -25,19 +25,9 @@ func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask, isRetry bool
 	correlationID := task.Request.CorrelationID
 	requestedAtString := task.RequestedAt.Format("2006-01-02T15:04:05.000Z")
 
-	processor := wp.determineHealthyProcessor()
-	// if processor == "" {
-	// 	logger.Error("No healthy processors available")
-	// 	wp.createPaymentRecord(correlationID, task.Request.Amount, 0, "none", task.RequestedAt, "failed", isRetry)
-	// 	return
-	// }
-
 	var fee float64
-	if processor == "default" {
-		fee = wp.DefaultFee
-	} else {
-		fee = wp.FallbackFee
-	}
+	processor := "default"
+	fee = wp.DefaultFee
 
 	ppPaymentRequest := &types.PaymentProcessorPaymentRequest{
 		PaymentRequest: task.Request,
@@ -47,11 +37,6 @@ func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask, isRetry bool
 	ppPayload, err := json.Marshal(ppPaymentRequest)
 	if err != nil {
 		logger.Error("Error marshaling request")
-		// wp.createPaymentRecord(correlationID, task.Request.Amount, fee, processor, task.RequestedAt, "failed", isRetry)
-		if float64(len(wp.PaymentTaskChannel)/cap(wp.PaymentTaskChannel)) > float64(0.8) {
-			logger.Error("HIGH FLOW: len: " + strconv.Itoa(len(wp.PaymentTaskChannel)) + " cap: " + strconv.Itoa(cap(wp.PaymentTaskChannel)))
-		}
-		logger.Error("FLOW: len: " + strconv.Itoa(len(wp.PaymentTaskChannel)) + " cap: " + strconv.Itoa(cap(wp.PaymentTaskChannel)))
 		wp.retryPool.Submit(
 			func() {
 				time.Sleep(200 * time.Millisecond)
@@ -61,16 +46,8 @@ func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask, isRetry bool
 		return
 	}
 
-	err = wp.executePaymentRequest(processor, ppPayload, isRetry)
+	err = wp.executePaymentRequest(ppPayload)
 	if err != nil {
-		// logger.Error("Payment processing failed")
-		// logger.Error("CB state: " + wp.DefaultCircuitBreaker.State().String())
-		// wp.trackPaymentResult(processor, false)
-		// wp.createPaymentRecord(correlationID, task.Request.Amount, fee, processor, task.RequestedAt, "failed", isRetry)
-		if float64(len(wp.PaymentTaskChannel)/cap(wp.PaymentTaskChannel)) > float64(0.8) {
-			logger.Error("HIGH FLOW: len: " + strconv.Itoa(len(wp.PaymentTaskChannel)) + " cap: " + strconv.Itoa(cap(wp.PaymentTaskChannel)))
-		}
-		logger.Error("FLOW: len: " + strconv.Itoa(len(wp.PaymentTaskChannel)) + " cap: " + strconv.Itoa(cap(wp.PaymentTaskChannel)))
 		wp.retryPool.Submit(
 			func() {
 				time.Sleep(150 * time.Millisecond)
@@ -80,42 +57,15 @@ func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask, isRetry bool
 		return
 	}
 
-	// wp.trackPaymentResult(processor, true)
-	wp.createPaymentRecord(correlationID, task.Request.Amount, fee, processor, task.RequestedAt, "success", isRetry)
+	wp.createPaymentRecord(correlationID, task.Request.Amount, fee, processor, task.RequestedAt, "success", false)
 }
 
-func (wp *WorkerPools) determineHealthyProcessor() string {
-	// defaultHealth := wp.getProcessorHealth("default")
-	// fallbackHealth := wp.getProcessorHealth("fallback")
-	//
-	// defaultHealthy := (defaultHealth.IsValid && !defaultHealth.Failing) && wp.DefaultCircuitBreaker.State() == gobreaker.StateClosed
-	// fallbackHealthy := (fallbackHealth.IsValid && !fallbackHealth.Failing) && wp.FallbackCircuitBreaker.State() == gobreaker.StateClosed
-	//
-	// if defaultHealthy {
-	// 	return "default"
-	// }
-	// if fallbackHealthy {
-	// 	return "fallback"
-	// }
-
-	return "default"
-}
-
-func (wp *WorkerPools) executePaymentRequest(processor string, ppPayload []byte, isRetry bool) error {
+func (wp *WorkerPools) executePaymentRequest(ppPayload []byte) error {
 	var endpoint string
 	var circuitBreaker *gobreaker.CircuitBreaker[[]byte]
 
-	if processor == "default" {
-		endpoint = wp.DefaultEndpoint
-		circuitBreaker = wp.DefaultCircuitBreaker
-	} else {
-		endpoint = wp.FallbackEndpoint
-		circuitBreaker = wp.FallbackCircuitBreaker
-	}
-
-	// if isRetry {
-	// 	circuitBreaker = wp.RetryCircuitBreaker
-	// }
+	endpoint = wp.DefaultEndpoint
+	circuitBreaker = wp.DefaultCircuitBreaker
 
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/payments", endpoint), bytes.NewReader(ppPayload))
 	if err != nil {
@@ -124,18 +74,6 @@ func (wp *WorkerPools) executePaymentRequest(processor string, ppPayload []byte,
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Length", strconv.Itoa(len(ppPayload)))
-
-	// resp, err := wp.Client.Do(req)
-	// if err != nil {
-	// 	return err
-	// }
-	// defer resp.Body.Close()
-	//
-	// if resp.StatusCode >= 400 {
-	// 	return fmt.Errorf("downstream error: %d", resp.StatusCode)
-	// }
-	//
-	// return nil
 
 	_, err = circuitBreaker.Execute(func() ([]byte, error) {
 		resp, err := wp.Client.Do(req)
@@ -162,42 +100,14 @@ func (wp *WorkerPools) createPaymentRecord(correlationID string, amount decimal.
 	}
 	defer tx.Rollback()
 
-	if isRetry {
-		_, err = tx.Stmt(wp.PreparedStmts.Update).Exec(status, processor, fee, correlationID)
-		if err != nil {
-			logger.Error("CRITICAL: Failed to update payment")
-			return
-		}
-	} else {
-		_, err = tx.Stmt(wp.PreparedStmts.Insert).Exec(correlationID, processor, amount, fee, requestedAt, status)
-		if err != nil {
-			logger.Error("CRITICAL: Failed to insert payment")
-			return
-		}
+	_, err = tx.Stmt(wp.PreparedStmts.Insert).Exec(correlationID, processor, amount, fee, requestedAt, status)
+	if err != nil {
+		logger.Error("CRITICAL: Failed to insert payment")
+		return
 	}
 
 	if err = tx.Commit(); err != nil {
 		logger.Error("CRITICAL: Failed to commit payment creation")
-		return
-	}
-}
-
-func (wp *WorkerPools) markPaymentPending(correlationID string) {
-	tx, err := wp.DB.Begin()
-	if err != nil {
-		logger.Error("Failed to begin payment pending transaction")
-		return
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Stmt(wp.PreparedStmts.MarkPending).Exec(correlationID)
-	if err != nil {
-		logger.Error("Failed to mark payment as pending")
-		return
-	}
-
-	if err = tx.Commit(); err != nil {
-		logger.Error("Failed to commit payment pending transaction")
 		return
 	}
 }

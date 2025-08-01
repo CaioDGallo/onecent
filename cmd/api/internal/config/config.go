@@ -51,7 +51,7 @@ func GetPaymentPoolSize() int {
 			return poolSize
 		}
 	}
-	return 100 // Default pool size
+	return 100
 }
 
 func GetRetryPoolSize() int {
@@ -60,5 +60,5 @@ func GetRetryPoolSize() int {
 			return poolSize
 		}
 	}
-	return 50 // Default pool size
+	return 50
 }
