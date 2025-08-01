@@ -24,8 +24,8 @@ func SetupDatabase(connStr string) (*sql.DB, *PreparedStatements, error) {
 		return nil, nil, err
 	}
 
-	db.SetMaxOpenConns(24)
-	db.SetMaxIdleConns(16)
+	db.SetMaxOpenConns(30)
+	db.SetMaxIdleConns(22)
 	db.SetConnMaxLifetime(3 * time.Minute)
 	db.SetConnMaxIdleTime(1 * time.Minute)
 

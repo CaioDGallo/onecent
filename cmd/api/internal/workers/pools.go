@@ -53,13 +53,21 @@ func NewWorkerPools(db *sql.DB, preparedStmts *database.PreparedStatements, defa
 	paymentPoolSize := config.GetPaymentPoolSize()
 	retryPoolSize := config.GetRetryPoolSize()
 
-	paymentPool, err := ants.NewPool(paymentPoolSize, ants.WithNonblocking(false))
+	paymentPool, err := ants.NewPool(
+		paymentPoolSize,
+		ants.WithNonblocking(false),
+		ants.WithPreAlloc(true),
+	)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 
-	retryPool, err := ants.NewPool(retryPoolSize, ants.WithNonblocking(false))
+	retryPool, err := ants.NewPool(
+		retryPoolSize,
+		ants.WithNonblocking(false),
+		ants.WithPreAlloc(true),
+	)
 	if err != nil {
 		paymentPool.Release()
 		cancel()

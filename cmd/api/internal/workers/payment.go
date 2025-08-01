@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
@@ -39,7 +40,7 @@ func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask) {
 		logger.Error("Error marshaling request")
 		wp.retryPool.Submit(
 			func() {
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(wp.calculateChannelBasedDelay())
 				wp.PaymentTaskChannel <- task
 			},
 		)
@@ -50,7 +51,7 @@ func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask) {
 	if err != nil {
 		wp.retryPool.Submit(
 			func() {
-				time.Sleep(150 * time.Millisecond)
+				time.Sleep(wp.calculateChannelBasedDelay())
 				wp.PaymentTaskChannel <- task
 			},
 		)
@@ -90,6 +91,28 @@ func (wp *WorkerPools) executePaymentRequest(ppPayload []byte) error {
 	})
 
 	return err
+}
+
+func (wp *WorkerPools) calculateChannelBasedDelay() time.Duration {
+	channelLen := len(wp.PaymentTaskChannel)
+	channelCap := cap(wp.PaymentTaskChannel)
+	
+	if channelCap == 0 {
+		return 50 * time.Millisecond
+	}
+	
+	fullnessRatio := float64(channelLen) / float64(channelCap)
+	
+	const minDelay = 10 * time.Millisecond
+	const maxDelay = 500 * time.Millisecond
+	
+	baseDelay := time.Duration(float64(minDelay) + 
+		fullnessRatio * float64(maxDelay - minDelay))
+	
+	jitterRange := baseDelay / 4
+	jitter := time.Duration(rand.Intn(int(jitterRange*2))) - jitterRange
+	
+	return baseDelay + jitter
 }
 
 func (wp *WorkerPools) createPaymentRecord(correlationID string, amount decimal.Decimal, fee float64, processor string, requestedAt time.Time, status string, isRetry bool) {
