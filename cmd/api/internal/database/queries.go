@@ -10,4 +10,3 @@ const (
 	StatsTo              = "SELECT COALESCE(payment_processor, 'default') as processor, COUNT(*) as count, COALESCE(SUM(amount), 0) as total_amount FROM payment_log WHERE status = 'success' AND requested_at <= $1 GROUP BY payment_processor"
 	StatsAll             = "SELECT COALESCE(payment_processor, 'default') as processor, COUNT(*) as count, COALESCE(SUM(amount), 0) as total_amount FROM payment_log WHERE status = 'success' GROUP BY payment_processor"
 )
-

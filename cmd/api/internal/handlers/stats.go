@@ -116,4 +116,3 @@ func (h *StatsHandler) GetPaymentsSummary(c fiber.Ctx) error {
 
 	return c.Send(resp)
 }
-

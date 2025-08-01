@@ -11,15 +11,11 @@ import (
 	"github.com/CaioDGallo/onecent/cmd/api/internal/database"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/handlers"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/logger"
-	"github.com/CaioDGallo/onecent/cmd/api/internal/metrics"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/router"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/workers"
 )
 
 func main() {
-	// Initialize metrics collection (only if ENABLE_METRICS=true)
-	metrics.Init()
-
 	db, preparedStmts, err := database.SetupDatabase(config.GetDatabaseConnectionString())
 	if err != nil {
 		logger.Fatal("failed to setup database")

@@ -45,4 +45,3 @@ func GetProcessorFee(client *http.Client, processorURL string) (float64, error) 
 
 	return floatFee, nil
 }
-

@@ -15,7 +15,6 @@ import (
 	"github.com/CaioDGallo/onecent/cmd/api/internal/config"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/database"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/logger"
-	"github.com/CaioDGallo/onecent/cmd/api/internal/metrics"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/types"
 )
 
@@ -151,20 +150,8 @@ func (wp *WorkerPools) StartPaymentConsumers() {
 				wp.wg.Add(1)
 				_ = wp.paymentPool.Submit(func() {
 					defer wp.wg.Done()
-					start := time.Now()
-
-					// Record channel processing metrics
-					metrics.RecordChannelProcess("payment")
-					metrics.UpdateChannelSize("payment", len(wp.PaymentTaskChannel))
-
-					// Update ants pool metrics
-					metrics.UpdateAntsPoolMetrics("payment", wp.paymentPool.Running(), wp.paymentPool.Cap(), wp.paymentPool.Free())
 
 					wp.ProcessPaymentDirect(task, false)
-
-					// Record processing duration
-					duration := time.Since(start).Seconds()
-					metrics.RecordChannelProcessDuration("payment", duration)
 				})
 			}
 		}

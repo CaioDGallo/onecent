@@ -25,7 +25,6 @@ services:
       - DATABASE_URL=postgresql://dev:secret123@postgres:5432/onecent?sslmode=disable
       - DEFAULT_PROCESSOR_ENDPOINT=http://payment-processor-default:8080
       - FALLBACK_PROCESSOR_ENDPOINT=http://payment-processor-fallback:8080
-      - ENABLE_METRICS=true
       - OTHER_INSTANCE_URL=http://app2:8080
       - PAYMENT_POOL_SIZE=800
       - RETRY_POOL_SIZE=500
@@ -43,7 +42,6 @@ services:
       - DATABASE_URL=postgresql://dev:secret123@postgres:5432/onecent?sslmode=disable
       - DEFAULT_PROCESSOR_ENDPOINT=http://payment-processor-default:8080
       - FALLBACK_PROCESSOR_ENDPOINT=http://payment-processor-fallback:8080
-      - ENABLE_METRICS=true
       - OTHER_INSTANCE_URL=http://app1:8080
       - PAYMENT_POOL_SIZE=800
       - RETRY_POOL_SIZE=500
