@@ -8,7 +8,6 @@ import (
 
 	"github.com/CaioDGallo/onecent/cmd/api/internal/client"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/config"
-	"github.com/CaioDGallo/onecent/cmd/api/internal/database"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/handlers"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/logger"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/router"
@@ -16,13 +15,6 @@ import (
 )
 
 func main() {
-	db, preparedStmts, err := database.SetupDatabase(config.GetDatabaseConnectionString())
-	if err != nil {
-		logger.Fatal("failed to setup database")
-	}
-	defer db.Close()
-	defer preparedStmts.Close()
-
 	httpClient := client.NewHTTPClient()
 
 	defaultFee, err := client.GetProcessorFee(httpClient, config.GetDefaultProcessorEndpoint())
@@ -35,7 +27,7 @@ func main() {
 		logger.Fatal("failed getting the fallback processor transaction fee")
 	}
 
-	workerPools, err := workers.NewWorkerPools(db, preparedStmts, config.GetDefaultProcessorEndpoint(), config.GetFallbackProcessorEndpoint(), defaultFee, fallbackFee, httpClient, nil, nil, nil)
+	workerPools, err := workers.NewWorkerPools(config.GetDefaultProcessorEndpoint(), config.GetFallbackProcessorEndpoint(), defaultFee, fallbackFee, httpClient, nil, nil, nil)
 	if err != nil {
 		logger.Fatal("failed to initialize worker pools")
 	}
@@ -48,10 +40,11 @@ func main() {
 	workerPools.StartPaymentConsumers()
 
 	paymentHandler := handlers.NewPaymentHandler(workerPools, defaultFee)
-	statsHandler := handlers.NewStatsHandler(preparedStmts)
+	statsHandler := handlers.NewStatsHandler(workerPools.StatsAggregator)
 	healthHandler := handlers.NewHealthHandler(workerPools)
+	internalHandler := handlers.NewInternalHandler(workerPools, workerPools.StatsAggregator)
 
-	app := router.SetupRoutes(paymentHandler, statsHandler, healthHandler)
+	app := router.SetupRoutes(paymentHandler, statsHandler, healthHandler, internalHandler)
 
 	go func() {
 		if err := app.Listen(config.ServerAddress); err != nil {

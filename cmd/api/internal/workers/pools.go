@@ -3,7 +3,6 @@ package workers
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -13,16 +12,17 @@ import (
 	"github.com/sony/gobreaker/v2"
 
 	"github.com/CaioDGallo/onecent/cmd/api/internal/config"
-	"github.com/CaioDGallo/onecent/cmd/api/internal/database"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/logger"
+	"github.com/CaioDGallo/onecent/cmd/api/internal/store"
 	"github.com/CaioDGallo/onecent/cmd/api/internal/types"
 )
 
 type WorkerPools struct {
 	PaymentTaskChannel      chan types.PaymentTask
 	RetryTaskChannel        chan types.PaymentTask
-	DB                      *sql.DB
-	PreparedStmts           *database.PreparedStatements
+	PaymentStore            *store.PaymentStore
+	RetryStore              *store.RetryStore
+	StatsAggregator         *store.StatsAggregator
 	DefaultEndpoint         string
 	FallbackEndpoint        string
 	DefaultFee              float64
@@ -47,7 +47,7 @@ type WorkerPools struct {
 	retryPool               *ants.Pool
 }
 
-func NewWorkerPools(db *sql.DB, preparedStmts *database.PreparedStatements, defaultEndpoint, fallbackEndpoint string, defaultFee, fallbackFee float64, httpClient *http.Client, defaultCB, fallbackCB, retryCB *gobreaker.CircuitBreaker[[]byte]) (*WorkerPools, error) {
+func NewWorkerPools(defaultEndpoint, fallbackEndpoint string, defaultFee, fallbackFee float64, httpClient *http.Client, defaultCB, fallbackCB, retryCB *gobreaker.CircuitBreaker[[]byte]) (*WorkerPools, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	paymentPoolSize := config.GetPaymentPoolSize()
@@ -74,11 +74,17 @@ func NewWorkerPools(db *sql.DB, preparedStmts *database.PreparedStatements, defa
 		return nil, err
 	}
 
+	instanceID := config.GetInstanceID()
+	paymentStore := store.NewPaymentStore()
+	retryStore := store.NewRetryStore(instanceID)
+	statsAggregator := store.NewStatsAggregator(paymentStore, config.GetOtherInstanceURL(), httpClient, instanceID)
+
 	wp := &WorkerPools{
 		PaymentTaskChannel:     make(chan types.PaymentTask, 2500),
 		RetryTaskChannel:       make(chan types.PaymentTask, 3000),
-		DB:                     db,
-		PreparedStmts:          preparedStmts,
+		PaymentStore:           paymentStore,
+		RetryStore:             retryStore,
+		StatsAggregator:        statsAggregator,
 		DefaultEndpoint:        defaultEndpoint,
 		FallbackEndpoint:       fallbackEndpoint,
 		DefaultFee:             defaultFee,

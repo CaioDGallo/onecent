@@ -86,5 +86,5 @@ func (wp *WorkerPools) checkSingleProcessorHealth(endpoint string) {
 	wp.syncHealthAfterUpdate()
 
 	logger.Info("Default processor became healthy - triggering priority retry burst")
-	wp.TriggerRetries()
+	// wp.TriggerRetries()
 }

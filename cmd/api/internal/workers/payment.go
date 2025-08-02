@@ -49,6 +49,7 @@ func (wp *WorkerPools) ProcessPaymentDirect(task types.PaymentTask) {
 
 	err = wp.executePaymentRequest(ppPayload)
 	if err != nil {
+		wp.createPaymentRecord(correlationID, task.Request.Amount, fee, processor, task.RequestedAt, "failed", false)
 		wp.retryPool.Submit(
 			func() {
 				time.Sleep(wp.calculateChannelBasedDelay())
@@ -116,22 +117,12 @@ func (wp *WorkerPools) calculateChannelBasedDelay() time.Duration {
 }
 
 func (wp *WorkerPools) createPaymentRecord(correlationID string, amount decimal.Decimal, fee float64, processor string, requestedAt time.Time, status string, isRetry bool) {
-	tx, err := wp.DB.Begin()
-	if err != nil {
-		logger.Error("CRITICAL: Failed to begin payment creation transaction")
-		return
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Stmt(wp.PreparedStmts.Insert).Exec(correlationID, processor, amount, fee, requestedAt, status)
-	if err != nil {
-		logger.Error("CRITICAL: Failed to insert payment")
-		return
-	}
-
-	if err = tx.Commit(); err != nil {
-		logger.Error("CRITICAL: Failed to commit payment creation")
-		return
+	wp.PaymentStore.StorePayment(correlationID, amount, fee, processor, requestedAt, status)
+	
+	if status == "success" {
+		wp.RetryStore.RemoveSuccessfulPayment(correlationID)
+	} else if status == "failed" {
+		wp.RetryStore.AddFailedPayment(correlationID, amount, fee, requestedAt)
 	}
 }
 
@@ -140,74 +131,23 @@ func (wp *WorkerPools) markMultiplePaymentsPending(correlationIDs []string) {
 		return
 	}
 
-	tx, err := wp.DB.Begin()
-	if err != nil {
-		logger.Error("Failed to begin batch payment pending transaction")
-		return
-	}
-	defer tx.Rollback()
-
 	for _, id := range correlationIDs {
-		_, err = tx.Stmt(wp.PreparedStmts.MarkPending).Exec(id)
-		if err != nil {
-			logger.Error("Failed to mark payment as pending in batch")
-			return
-		}
-	}
-
-	if err = tx.Commit(); err != nil {
-		logger.Error("Failed to commit batch payment pending transaction")
-		return
+		wp.RetryStore.MarkPaymentPending(id)
 	}
 }
 
 func (wp *WorkerPools) processFailedPayments() {
-	tx, err := wp.DB.Begin()
-	if err != nil {
-		logger.Error("Failed to begin transaction for retry processing")
-		return
-	}
-	defer tx.Rollback()
+	wp.RetryStore.CleanupStaleLocks(5 * time.Minute)
+	
+	paymentTasks := wp.RetryStore.GetFailedPaymentsForRetry(300)
 
-	rows, err := tx.Stmt(wp.PreparedStmts.SelectFailed).Query()
-	if err != nil {
-		logger.Error("Failed to query failed payments")
+	if len(paymentTasks) == 0 {
 		return
 	}
-	defer rows.Close()
 
 	var paymentIDs []string
-	var paymentTasks []types.PaymentTask
-
-	for rows.Next() {
-		var correlationID string
-		var amount decimal.Decimal
-		var fee float64
-		var requestedAt time.Time
-
-		if err := rows.Scan(&correlationID, &amount, &fee, &requestedAt); err != nil {
-			logger.Error("Failed to scan failed payment row")
-			continue
-		}
-
-		paymentIDs = append(paymentIDs, correlationID)
-		paymentTasks = append(paymentTasks, types.PaymentTask{
-			Request: types.PaymentRequest{
-				CorrelationID: correlationID,
-				Amount:        amount,
-			},
-			RequestedAt: requestedAt,
-			Fee:         fee,
-		})
-	}
-
-	if err = tx.Commit(); err != nil {
-		logger.Error("Failed to commit retry transaction")
-		return
-	}
-
-	if len(paymentIDs) == 0 {
-		return
+	for _, task := range paymentTasks {
+		paymentIDs = append(paymentIDs, task.Request.CorrelationID)
 	}
 
 	wp.markMultiplePaymentsPending(paymentIDs)
