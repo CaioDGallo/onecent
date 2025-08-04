@@ -1,9 +1,3 @@
-//! HTTP request handlers
-//!
-//! This module contains all the HTTP endpoint handlers. Each handler is responsible
-//! for extracting data from HTTP requests, calling the appropriate services, and
-//! returning HTTP responses.
-
 use axum::{
     Json,
     extract::{Query, State},
@@ -15,15 +9,10 @@ use crate::models::*;
 use crate::services::{health_service, payment_service};
 use crate::state::AppState;
 
-/// Root endpoint - simple health check
 pub async fn root() -> &'static str {
     "Hello, World!"
 }
 
-/// Sync health status between instances
-///
-/// This endpoint receives health updates from the primary instance (INSTANCE_ID=1)
-/// and updates the local health state accordingly.
 pub async fn health_sync(
     State(state): State<AppState>,
     Json(payload): Json<HealthStatus>,
@@ -32,14 +21,6 @@ pub async fn health_sync(
     StatusCode::OK
 }
 
-/// Get payment summary with optional time filtering
-///
-/// Query parameters:
-/// - `from`: Start time in RFC3339 format (optional)
-/// - `to`: End time in RFC3339 format (optional)
-/// - No params: Returns all payments
-/// - One param: Returns payments from/to that time
-/// - Both params: Returns payments in the time range
 pub async fn payments_summary(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -51,10 +32,6 @@ pub async fn payments_summary(
     (StatusCode::OK, Json(summary))
 }
 
-/// Create a new payment
-///
-/// Accepts payment data (amount used only on the first request), stores it for async processing, and returns immediately.
-/// The actual payment processing happens in the background.
 pub async fn create_payment(
     State(state): State<AppState>,
     Json(payload): Json<CreatePayment>,
