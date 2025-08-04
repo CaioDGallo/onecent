@@ -1,24 +1,22 @@
-FROM golang:1.24.4-alpine AS builder
-
-RUN apk add --no-cache git tzdata
-
+FROM rust:1.85-alpine AS chef
+RUN apk add --no-cache git tzdata musl-dev
+RUN cargo install --locked cargo-chef
 WORKDIR /build
 
-COPY go.mod go.sum ./
-RUN go mod download
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
 
 COPY . .
-
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -ldflags="-s -w" \
-  -trimpath \
-  #TODO: Remove before submit
-  # -tags dev \
-  -o app \
-  ./cmd/api/main.go
+RUN cargo build --release --target x86_64-unknown-linux-musl && \
+    strip target/x86_64-unknown-linux-musl/release/onecent
 
 RUN apk add --no-cache upx && \
-  upx --best --lzma app
+    upx --best --lzma target/x86_64-unknown-linux-musl/release/onecent
 
 FROM alpine:3.19
 
@@ -26,17 +24,13 @@ RUN apk add --no-cache tzdata
 
 COPY --from=builder /etc/passwd /etc/passwd
 
-COPY --from=builder /build/app /app
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/onecent /app
 
 RUN addgroup -S appuser && adduser -S appuser -G appuser; \
-  mkdir -p /data && chown appuser:appuser /data
+    mkdir -p /data && chown appuser:appuser /data
 
 USER appuser
 
 EXPOSE 8080
-
-ENV GOGC=90 \
-  GOMEMLIMIT=35MiB \
-  GOMAXPROCS=1
 
 ENTRYPOINT ["/app"]

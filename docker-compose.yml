@@ -25,6 +25,7 @@ services:
       - INSTANCE_ID=1
       - DEFAULT_PROCESSOR_ENDPOINT=http://payment-processor-default:8080
       - FALLBACK_PROCESSOR_ENDPOINT=http://payment-processor-fallback:8080
+      - REDIS_URL=redis://redis:6379
 
   app2:
     <<: *app
@@ -38,6 +39,7 @@ services:
       - INSTANCE_ID=2
       - DEFAULT_PROCESSOR_ENDPOINT=http://payment-processor-default:8080
       - FALLBACK_PROCESSOR_ENDPOINT=http://payment-processor-fallback:8080
+      - REDIS_URL=redis://redis:6379
 
   haproxy:
     image: haproxy:3.2-alpine
